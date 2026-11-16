@@ -116,11 +116,11 @@
 
   // 1) registrazione
   let rec = null, wake = null;
-  async function screenRecord() {
+  async function screenRecord(m0) {
     if (!navigator.mediaDevices || !window.MediaRecorder) return $(`<div class="card"><div class="big err">Registrazione non supportata</div><p class="sub">Apri l'app con Chrome.</p></div>`);
-    let meal = guessMeal(), stream;
+    let meal = (typeof m0 === "string" ? m0 : guessMeal()), stream;
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-    catch (e) { $(`<div class="card row"><div class="big err">Microfono non consentito</div><p class="sub">Dai il permesso al microfono (icona lucchetto accanto all'indirizzo, oppure Impostazioni › App › Pasti › Autorizzazioni).</p><button class="btn" id="retry">Riprova</button></div>`); document.getElementById("retry").onclick = screenRecord; return; }
+    catch (e) { $(`<div class="card row"><div class="big err">Microfono non consentito</div><p class="sub">Dai il permesso al microfono (icona lucchetto accanto all'indirizzo, oppure Impostazioni › App › Pasti › Autorizzazioni).</p><button class="btn" id="retry">Riprova</button></div>`); document.getElementById("retry").onclick = () => screenRecord(meal); return; }
     const mime = ["audio/mp4;codecs=mp4a.40.2", "audio/mp4", "audio/webm;codecs=opus", "audio/webm"].find(t => MediaRecorder.isTypeSupported(t)) || "";
     const mr = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
     const chunks = []; let t0 = Date.now(), tick;
@@ -178,7 +178,7 @@
     }
   }
 
-  // 0) avvio: se c'è qualcosa in sospeso lo propone, altrimenti parte subito la registrazione
+  // 0) avvio: se c è qualcosa in sospeso lo propone, altrimenti schermata Pronto
   async function screenStart() {
     let items = []; try { items = await idb.all(); } catch {}
     items.sort((a, b) => a.createdAt - b.createdAt);
@@ -188,12 +188,21 @@
     if (ready.length) {
       $(`<div class="card row"><div class="big warn">${ready.length} in attesa di invio</div><p class="sub">Non sono ancora su Drive.</p></div>
          <div class="row"><button class="btn" id="flush">Invia ora</button><button class="btn ghost" id="new">Nuova registrazione</button></div>`);
-      document.getElementById("new").onclick = screenRecord;
+      document.getElementById("new").onclick = () => screenReady();
       document.getElementById("flush").onclick = async () => { getToken().catch(() => {}); for (const it of ready) { try { await uploadItem(it); } catch (e) { return send(it); } } screenStart(); };
       return;
     }
     if (!CFG.CLIENT_ID || CFG.CLIENT_ID.startsWith("INCOLLA")) return $(`<div class="card row"><div class="big warn">Manca un'impostazione</div><p class="sub">Apri config.js e incolla il tuo CLIENT_ID di Google (vedi LEGGIMI.txt, passo 3).</p></div>`);
-    screenRecord();
+    screenReady();
+  }
+
+  // schermata di attesa: la registrazione parte solo quando premi
+  function screenReady() {
+    let meal = guessMeal();
+    $(`<div class="card"><div class="big">Pronto</div><p class="sub">Scegli il pasto e premi il tasto per iniziare a registrare.</p></div>
+       ${chips(meal)}<button class="btn red" id="go">🎙️ Inizia registrazione</button>`);
+    bindChips(m => meal = m);
+    document.getElementById("go").onclick = () => screenRecord(meal);
   }
 
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
