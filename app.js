@@ -43,6 +43,8 @@
   // ── Google: accesso e Drive ──────────────────────────────────────────────
   const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
   let tokenClient = null, tok = null, tokExp = 0;
+  // il token (valido ~1 ora, solo drive.file) resta sul telefono: riaprendo l'app entro l'ora non richiede di nuovo Google
+  try { const sv = JSON.parse(localStorage.getItem("pasti_tok") || "null"); if (sv && sv.t && sv.e > Date.now() + 120000) { tok = sv.t; tokExp = sv.e; } } catch {}
   const loadGsi = () => new Promise((res, rej) => {
     if (window.google && google.accounts && google.accounts.oauth2) return res();
     const s = document.createElement("script"); s.src = "https://accounts.google.com/gsi/client"; s.async = true;
@@ -62,7 +64,7 @@
       if (!tokenClient) tokenClient = google.accounts.oauth2.initTokenClient({ client_id: CFG.CLIENT_ID, scope: SCOPE, callback: () => {} });
       tokenClient.callback = (r) => {
         if (r.error) return rej(new Error("Accesso Google non riuscito: " + r.error));
-        tok = r.access_token; tokExp = Date.now() + (Number(r.expires_in) || 3600) * 1000; store.set("pasti_granted", "1"); res(tok);
+        tok = r.access_token; tokExp = Date.now() + (Number(r.expires_in) || 3600) * 1000; store.set("pasti_granted", "1"); store.set("pasti_tok", JSON.stringify({ t: tok, e: tokExp })); res(tok);
       };
       tokenClient.error_callback = (e) => rej(new Error("Accesso Google annullato"));
       tokenClient.requestAccessToken({ prompt: store.get("pasti_granted") ? "" : "consent" });
@@ -71,7 +73,7 @@
   async function gfetch(url, opts = {}, retry = true) {
     const t = await getToken();
     const r = await fetch(url, { ...opts, headers: { ...(opts.headers || {}), Authorization: "Bearer " + t } });
-    if (r.status === 401 && retry) { tok = null; return gfetch(url, opts, false); }
+    if (r.status === 401 && retry) { tok = null; store.set("pasti_tok", ""); return gfetch(url, opts, false); }
     if (!r.ok) { const e = new Error("Drive " + r.status + ": " + (await r.text()).slice(0, 160)); e.status = r.status; throw e; }
     return r.json();
   }
@@ -169,11 +171,11 @@
       const base = await uploadItem(it);
       $(`<div class="card row"><div class="big ok">✓ Salvato su Drive</div><div class="name">${esc(base)}${it.photo ? "<br>registrazione + foto" : "<br>solo registrazione"}</div></div>
          <div class="row"><button class="btn grn" id="again">Nuovo pasto</button></div>`);
-      document.getElementById("again").onclick = screenRecord;
+      document.getElementById("again").onclick = () => screenReady();
     } catch (e) {
       $(`<div class="card row"><div class="big err">Non salvato</div><p class="sub">${esc(e.message)}</p><p class="small">Non hai perso niente: la registrazione resta sul telefono.</p></div>
          <div class="row"><button class="btn" id="retry">Riprova</button><button class="btn ghost" id="later">Più tardi</button></div>`);
-      document.getElementById("retry").onclick = () => { tok = null; send(it); };
+      document.getElementById("retry").onclick = () => { tok = null; store.set("pasti_tok", ""); send(it); };
       document.getElementById("later").onclick = screenStart;
     }
   }
@@ -202,7 +204,7 @@
     $(`<div class="card"><div class="big">Pronto</div><p class="sub">Scegli il pasto e premi il tasto per iniziare a registrare.</p></div>
        ${chips(meal)}<button class="btn red" id="go">🎙️ Inizia registrazione</button>`);
     bindChips(m => meal = m);
-    document.getElementById("go").onclick = () => screenRecord(meal);
+    document.getElementById("go").onclick = async () => { try { await getToken(); } catch {} screenRecord(meal); };
   }
 
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
